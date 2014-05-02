@@ -1,0 +1,35 @@
+{
+  "name": "jade-glob-include",
+  "version": "1.0.0",
+  "description": "Extend Jade's Include to Support File Globbing",
+  "main": "index.coffee",
+  "dependencies": {
+    "jade": "~1.3.1",
+    "glob": "~3.2.9",
+    "colors": "^0.6.2"
+  },
+  "devDependencies": {
+    "jade": "~1.3.1",
+    "jasmine-node": ">=1.14.3",
+    "glob": "~3.2.9",
+    "colors": "^0.6.2"
+  },
+  "scripts": {
+    "test": "jasmine-node spec/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:KellyLSB/jade-glob-include"
+  },
+  "keywords": [
+    "jade",
+    "glob",
+    "include"
+  ],
+  "author": "Kelly Becker",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/KellyLSB/jade-glob-include/issues"
+  },
+  "homepage": "https://github.com/KellyLSB/jade-glob-include"
+}
