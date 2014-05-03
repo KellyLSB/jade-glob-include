@@ -3,6 +3,7 @@
 # Website: http://kellybecker.me
 # Repository: http://github.com/KellyLSB/jade-glob-include
 
+
 # Include node tools
 nodePath = require('path')
 nodeFs = require('fs')
@@ -18,104 +19,177 @@ glob = require('glob')
 utils = require('jade/lib/utils')
 
 
-# Patcher for the Jade parser.
-module.exports.Patch = (jade) ->
-  JadeParser = jade.Parser
+# Array Unique
+Array.prototype.uniq = ->
+  cache = {}; for data, index in @
+    if cache[data] then continue
+    cache[data] = true
+    data
 
-  # Don't patch a second time
-  # NOTE: Used for grunt-jade data hack.
-  if JadeParser.prototype.glob_includer then return jade
 
-  # Modify the original so it may be used.
-  jadeParseInclude = JadeParser.prototype.parseInclude
+# Array is all matching CB
+Array.prototype.isAll = (cb) ->
+  result = (!!cb(data) for data in @).uniq()
+  if result.length == 1 then result.shift() else false
 
-  # Split at comment to grab the include token data
-  # TODO: This will need to be continuously updated as Jade changes.
-  jadeParseInclude = jadeParseInclude
-    .toString().split('// has-filter')
 
-  # Dual Assignment
-  [jadeParsePrefix, jadeParseInclude] = jadeParseInclude
+# String Repeat
+String.prototype.repeat = (num, mult) ->
+  if typeof mult is 'undefined' then mult = 1
+  Array((num * mult) + 1).join(@)
 
-  # Create new Include Parser
-  eval "jadeParseInclude = function(fs, tok, path) {\n#{jadeParseInclude}"
 
-  # Reapply modified code
-  JadeParser.prototype.jadeParseInclude = jadeParseInclude
+# Setup the Jade Glob Include patcher class
+class JadeGlobInclude
+  @tmp_dir: nodePath.resolve('tmp')
+  @tmp_file: nodePath.resolve(@tmp_dir, 'glob_tmp.jade')
+  @log_indent: 0
 
-  # Replace the parser
-  JadeParser.prototype.parseInclude = ->
-    # Include the tokenized data from Jade
-    eval jadeParsePrefix.split("\n").splice(1).join("\n")
 
-    # NOTE: Remove CWD from the path; for readability and that we
-    # are adding it back in for path's that won't return with it....
-    path = nodePath.normalize(path).replace("#{process.cwd()}/", '')
+  @log: (message, indent) ->
+    indent = if ! indent then @log_indent
 
-    # Get list of files to include
-    files = glob.sync nodePath.normalize(path)
+    prefix = if indent > 0 then '~'.repeat(indent)+'> ' else ''
 
-    # If there was only one file; process normally.
-    if files.length == 1
-      file = files.shift()
-      if this.filename == temp_file
-        console.info '~> '.cyan + "Jade Glob Includer: Including from Glob: '#{file}'.".yellow
-      else
-        console.info "Jade Glob Includer: Including normally: '#{file}'.".yellow
-      return @jadeParseInclude fs, tok, file
+    console.info prefix.cyan + message
 
-    # Prepare the includes for the temporary files
-    if files.length > 0
-      console.info "Jade Glob Includer: Including #{files.length} files via '#{path}' match.".cyan
 
-      # Prep the temporary file contents.
-      temp_data = ("include ../#{file}" for file in files)
+  @tmpDir: (tmp) ->
+    @tmp_dir = nodePath.resolve(tmp)
+    @tmpFile(nodePath.basename(@tmp_file))
+    return @
 
-    # Notify of zero files globbed
-    else
-      console.info "Jade Glob Includer: Zero files matched '#{path}'".red
-      console.info "~> Will continue with using a empty Temporary File.\n".red
+
+  @prepTmpDir: ->
+    # Remove 'tmp' if it is a file
+    if nodeFs.existsSync(@tmp_dir) && ! nodeFs.statSync(@tmp_dir).isDirectory()
+      nodeFs.unlinkSync(@tmp_dir)
+
+    # Create the 'tmp' directory
+    if ! nodeFs.existsSync(@tmp_dir)
+      @log "Preparing temporary directory '#{@tmp_dir}'....".cyan
+      nodeFs.mkdirSync(@tmp_dir)
+
+
+  @tmpFile: (file) ->
+    @tmp_file = nodePath.resolve(@tmp_dir, nodePath.basename(file))
+    return @
+
+
+  @useTmpFile: (data, cb) ->
+    # Bump log indent up
+    @log_indent++
+
+    # Enforce the use an an Array containing strings
+    if ! data instanceof Array && typeof data is 'string' then data = [data]
+    if ! data instanceof Array && ! typeof data is 'string'
+      return @log 'Received non Array or String as argument in `JadeGlobInclude.useTmpFile()` ...'.red
+    if data instanceof Array && ! data.isAll((d) -> typeof d is 'string')
+      return @log 'Received non String in Array in `JadeGlobInclude.useTmpFile()` ...'.red
 
     # Add notice to the top if the file describing it.
-    temp_data.unshift("//- Generated On: #{Date()}.\n")
-    temp_data.unshift('//- Temporary Jade File For Globbed Includes.')
+    data.unshift "//- Generated On: #{Date()}.\n"
+    data.unshift '//- Temporary Jade File For Globbed Includes.'
 
     # Write the temporary file
-    console.info '~> '.cyan + "Jade Glob Includer: Creating temporary file '#{temp_file}'.".yellow
-    nodeFs.writeFileSync temp_file,
-      temp_data.join("\n"),
-      flags: 'w+'
+    @log "Creating temporary file '#{@tmp_file}'.".yellow
+    nodeFs.writeFileSync @tmp_file, data.join("\n"), flags: 'w+'
 
-    # Parse the temporary file.
-    captured_output = @jadeParseInclude fs, tok, temp_file
+    # Run callback
+    captured_result = cb @tmp_file
 
-    # Cleanup and remove the temporary file
-    if nodeFs.existsSync(temp_file)
-      console.info '~> '.cyan + "Jade Glob Includer: Removing temporary file '#{temp_file}'.".yellow
-      nodeFs.unlinkSync(temp_file)
+    # Cleanup and remove temporary file
+    if nodeFs.existsSync @tmp_file
+      @log "Removing temporary file '#{@tmp_file}'.".yellow
+      nodeFs.unlinkSync @tmp_file
 
-    # Return the captured output
-    return captured_output
+    # Knock log indent down
+    @log_indent--
 
-  # Mark as initialized
-  JadeParser.prototype.glob_includer = true
+    # Reuturn the result
+    captured_result
 
-  # Notice to console of initialization.
-  console.info "Jade Glob Includer: Initialized.".green
 
-  # Define location for temporary file
-  temp_dir = nodePath.join(process.cwd(), 'tmp')
-  temp_file = nodePath.join(temp_dir, 'jade_glob_include_tmp.jade')
+  @patch: (jade) ->
+    JadeParser = jade.Parser
 
-  # Remove 'tmp' if it is a file
-  if nodeFs.existsSync(temp_dir) && ! nodeFs.statSync(temp_dir).isDirectory()
-    nodeFs.unlinkSync(temp_dir)
+    # Don't patch a second time
+    # NOTE: Used for grunt-jade data hack.
+    if JadeParser.prototype.glob_includer then return jade
 
-  # Create the 'tmp' directory
-  if ! nodeFs.existsSync(temp_dir)
-    console.info "Jade Glob Includer: Creating temporary directory '#{temp_dir}'.".yellow
-    nodeFs.mkdirSync(temp_dir)
+    # Notice to user :D
+    @log 'Initializing Jade Glob Include....'.cyan
 
-  # Return modified jade instance.
-  # NOTE: also returned by reference; the original object is modified.
-  return jade
+    # Prepare temporary directory
+    @prepTmpDir()
+
+    # Notice to user :D
+    @log 'Mokeypatching Jade Parser....'.cyan
+
+    # Copy out original method so it may be monkeypatched.
+    jadeParseInclude = JadeParser.prototype.parseInclude.toString()
+
+    # Split at comment to grab the include token data
+    # TODO: This will need to be continuously updated as Jade changes.
+    jadeParseInclude = jadeParseInclude.split('// has-filter')
+
+    # Dual Assignment of the array halves
+    [jadeParsePrefix, jadeParseInclude] = jadeParseInclude
+
+    # Notice to user :D
+    @log 'Carefully placing modified original parser back into Jade....'.cyan
+
+    # Create new Include Parser
+    eval "JadeParser.prototype.jadeParseInclude = function(fs, tok, path) {\n#{jadeParseInclude}"
+
+    # Make a var of self
+    $ = @
+
+    # Replace the parser
+    JadeParser.prototype.parseInclude = ->
+
+      # Include the tokenized data from Jade
+      eval jadeParsePrefix.split("\n").splice(1).join("\n")
+
+      # NOTE: Remove CWD from the path; for readability and that we
+      # are adding it back in for path's that won't return with it....
+      path = nodePath.normalize(path).replace("#{process.cwd()}/", '')
+
+      # Get list of files to include
+      files = glob.sync nodePath.normalize(path)
+
+      # If there was only one file; process normally.
+      if files.length == 1
+        file = files.shift()
+        $.log "Including: '#{file}'.".yellow
+        return @jadeParseInclude fs, tok, file
+
+      # Prepare data for temporary file
+      if files.length > 0
+        $.log "Including #{files.length} files via '#{path}' match.".cyan
+
+        # Prepare the include statements
+        data = for file in files
+          "include #{nodePath.relative($.tmp_dir, nodePath.resolve(file))}"
+
+      # No data was found, in order to prevent error return empty array
+      else
+        $.log "Zero files matched '#{path}'; will continue with using an" +
+        "empty temporary file in order to prevent error.".red, @log_indent + 1
+        data = []
+
+      $.useTmpFile data, (file) => @jadeParseInclude(fs, tok, file)
+
+    # Mark as initialized
+    JadeParser.prototype.glob_includer = true
+
+    # Notice to console of initialization.
+    @log "Oh my Glob! Jade Glob Includer is now initialized....".green
+
+    # Return modified jade instance.
+    # NOTE: also returned by reference; the original object is modified.
+    jade
+
+
+# Export the class
+module.exports = JadeGlobInclude

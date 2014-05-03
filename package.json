@@ -1,6 +1,6 @@
 {
   "name": "jade-glob-include",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Extend Jade's Include to Support File Globbing",
   "main": "index.coffee",
   "dependencies": {
