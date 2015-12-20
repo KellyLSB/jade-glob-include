@@ -17,6 +17,7 @@ glob = require('glob')
 # NOTE: Include jade utils; this is a REQUIRED module.
 # While I am Hijacking Jade, the code still runs in the context of this file.
 utils = require('jade/lib/utils')
+nodes = require('jade/lib/nodes')
 
 
 # Array Unique
